@@ -4,6 +4,8 @@
 set -e
 
 echo "Подготовка базы данных..."
+sudo apt update
+sudo apt install -y postgresql postgresql-contrib
 
 # Проверить наличие PostgreSQL, если нет - установить
 if ! command -v psql &> /dev/null; then
