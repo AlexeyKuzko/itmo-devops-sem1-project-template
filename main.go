@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -168,11 +169,18 @@ func handleGetPrices(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	file, err := os.Create("data.csv")
+	// Create temporary directory for files
+	tempDir := os.TempDir()
+	csvFilePath := filepath.Join(tempDir, "data.csv")
+	zipFilePath := filepath.Join(tempDir, "data.zip")
+
+	// Create CSV file
+	file, err := os.Create(csvFilePath)
 	if err != nil {
-		http.Error(w, "Ошибка создания файла", http.StatusInternalServerError)
+		http.Error(w, "Ошибка создания файла CSV", http.StatusInternalServerError)
 		return
 	}
+	defer os.Remove(csvFilePath)
 	defer file.Close()
 
 	writer := csv.NewWriter(file)
@@ -188,12 +196,19 @@ func handleGetPrices(w http.ResponseWriter, r *http.Request) {
 		}
 		writer.Write([]string{id, created_at, name, category, fmt.Sprintf("%.2f", price)})
 	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		http.Error(w, "Ошибка записи CSV", http.StatusInternalServerError)
+		return
+	}
 
-	archive, err := os.Create("data.zip")
+	// Create ZIP file
+	archive, err := os.Create(zipFilePath)
 	if err != nil {
 		http.Error(w, "Ошибка создания архива", http.StatusInternalServerError)
 		return
 	}
+	defer os.Remove(zipFilePath)
 	defer archive.Close()
 
 	zipWriter := zip.NewWriter(archive)
@@ -206,9 +221,21 @@ func handleGetPrices(w http.ResponseWriter, r *http.Request) {
 	}
 
 	file.Seek(0, 0)
-	io.Copy(csvFile, file)
+	if _, err := io.Copy(csvFile, file); err != nil {
+		http.Error(w, "Ошибка копирования данных в архив", http.StatusInternalServerError)
+		return
+	}
 
-	http.ServeFile(w, r, "data.zip")
+	// Ensure ZIP is properly closed
+	if err := zipWriter.Close(); err != nil {
+		http.Error(w, "Ошибка завершения архива", http.StatusInternalServerError)
+		return
+	}
+
+	// Serve the file
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"data.zip\"")
+	http.ServeFile(w, r, zipFilePath)
 }
 
 func main() {
