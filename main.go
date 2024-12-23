@@ -79,6 +79,7 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 	defer zipReader.Close()
 
 	var totalItems int
+	var skippedRows int
 	categorySet := make(map[string]struct{})
 	var totalPrice float64
 
@@ -102,15 +103,15 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 				}
 				if err != nil {
 					log.Printf("Ошибка чтения строки CSV: %v", err)
-					http.Error(w, "Ошибка чтения строки CSV", http.StatusInternalServerError)
-					return
+					skippedRows++
+					continue
 				}
 
 				// Проверка и обработка данных
 				if len(record) < 5 {
 					log.Printf("Ошибка: недостаточно данных в строке: %v", record)
-					http.Error(w, "Ошибка в формате CSV", http.StatusBadRequest)
-					return
+					skippedRows++
+					continue
 				}
 
 				id := strings.TrimSpace(record[0])
@@ -120,15 +121,15 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 				price, err := strconv.ParseFloat(strings.TrimSpace(record[4]), 64)
 				if err != nil {
 					log.Printf("Ошибка преобразования цены '%s': %v", record[4], err)
-					http.Error(w, "Ошибка преобразования цены", http.StatusBadRequest)
-					return
+					skippedRows++
+					continue
 				}
 
 				// Проверка формата даты
 				if _, err := time.Parse("2006-01-02", created_at); err != nil {
 					log.Printf("Некорректный формат даты '%s': %v", created_at, err)
-					http.Error(w, "Некорректный формат даты", http.StatusBadRequest)
-					return
+					skippedRows++
+					continue
 				}
 
 				// Запись в базу данных
@@ -136,8 +137,8 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 					id, created_at, name, category, price)
 				if err != nil {
 					log.Printf("Ошибка записи в базу данных для ID '%s': %v", id, err)
-					http.Error(w, "Ошибка записи в базу данных", http.StatusInternalServerError)
-					return
+					skippedRows++
+					continue
 				}
 
 				totalItems++
@@ -148,10 +149,11 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 	}
 
 	totalCategories := len(categorySet)
-	response := PostResponse{
-		TotalItems:      totalItems,
-		TotalCategories: totalCategories,
-		TotalPrice:      totalPrice,
+	response := map[string]interface{}{
+		"total_items":      totalItems,
+		"total_categories": totalCategories,
+		"total_price":      totalPrice,
+		"skipped_rows":     skippedRows,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
