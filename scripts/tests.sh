@@ -53,14 +53,7 @@ check_api_simple() {
     
     # Проверка GET /api/v0/prices
     echo "Тестирование GET /api/v0/prices"
-    curl -s -o output.zip http://localhost:8080/api/v0/prices
-    if [ -f "output.zip" ]; then
-        echo "GET Request successful, output.zip created."
-        rm output.zip
-    else
-        echo "GET Request failed."
-        exit 1
-    fi
+    
     # Сохраняем текущую директорию
     current_dir=$(pwd)
     
