@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Сразу останавливается, если какая-либо команда возвращает ненулевой код.
+# Exit immediately if a command exits with a non-zero status
 set -e
 
 # Проверить наличие PostgreSQL, если нет - установить
