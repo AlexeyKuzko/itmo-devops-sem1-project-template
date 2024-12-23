@@ -50,6 +50,7 @@ func initDB() {
 func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 	file, _, err := r.FormFile("file")
 	if err != nil {
+		log.Printf("Ошибка загрузки файла: %v", err)
 		http.Error(w, "Не удалось загрузить файл", http.StatusBadRequest)
 		return
 	}
@@ -57,18 +58,21 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 
 	tempFile, err := os.CreateTemp("", "uploaded-*.zip")
 	if err != nil {
+		log.Printf("Ошибка сохранения файла: %v", err)
 		http.Error(w, "Ошибка сохранения файла", http.StatusInternalServerError)
 		return
 	}
 	defer os.Remove(tempFile.Name())
 
 	if _, err := io.Copy(tempFile, file); err != nil {
+		log.Printf("Ошибка копирования файла: %v", err)
 		http.Error(w, "Ошибка копирования файла", http.StatusInternalServerError)
 		return
 	}
 
 	zipReader, err := zip.OpenReader(tempFile.Name())
 	if err != nil {
+		log.Printf("Ошибка открытия архива: %v", err)
 		http.Error(w, "Ошибка чтения архива", http.StatusBadRequest)
 		return
 	}
@@ -82,6 +86,7 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(f.Name, ".csv") {
 			csvFile, err := f.Open()
 			if err != nil {
+				log.Printf("Ошибка открытия CSV: %v", err)
 				http.Error(w, "Ошибка открытия CSV", http.StatusInternalServerError)
 				return
 			}
@@ -96,6 +101,7 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 				if err != nil {
+					log.Printf("Ошибка чтения строки CSV: %v", err)
 					http.Error(w, "Ошибка чтения строки CSV", http.StatusInternalServerError)
 					return
 				}
@@ -107,12 +113,14 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 				category := record[3]
 				price, err := strconv.ParseFloat(record[4], 64)
 				if err != nil {
+					log.Printf("Ошибка преобразования цены '%s': %v", record[4], err)
 					http.Error(w, "Ошибка преобразования цены", http.StatusBadRequest)
 					return
 				}
 
 				// Проверка формата даты
 				if _, err := time.Parse("2006-01-02", createdAt); err != nil {
+					log.Printf("Некорректный формат даты '%s': %v", createdAt, err)
 					http.Error(w, "Некорректный формат даты", http.StatusBadRequest)
 					return
 				}
@@ -121,6 +129,7 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 				_, err = db.Exec("INSERT INTO prices (id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
 					id, createdAt, name, category, price)
 				if err != nil {
+					log.Printf("Ошибка записи в базу данных для ID '%s': %v", id, err)
 					http.Error(w, "Ошибка записи в базу данных", http.StatusInternalServerError)
 					return
 				}
