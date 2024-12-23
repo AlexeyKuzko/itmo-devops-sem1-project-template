@@ -114,7 +114,7 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 				}
 
 				id := strings.TrimSpace(record[0])
-				createdAt := strings.TrimSpace(record[1])
+				created_at := strings.TrimSpace(record[1])
 				name := strings.TrimSpace(record[2])
 				category := strings.TrimSpace(record[3])
 				price, err := strconv.ParseFloat(strings.TrimSpace(record[4]), 64)
@@ -125,15 +125,15 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 				}
 
 				// Проверка формата даты
-				if _, err := time.Parse("2006-01-02", createdAt); err != nil {
-					log.Printf("Некорректный формат даты '%s': %v", createdAt, err)
+				if _, err := time.Parse("2006-01-02", created_at); err != nil {
+					log.Printf("Некорректный формат даты '%s': %v", created_at, err)
 					http.Error(w, "Некорректный формат даты", http.StatusBadRequest)
 					return
 				}
 
 				// Запись в базу данных
 				_, err = db.Exec("INSERT INTO prices (id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
-					id, createdAt, name, category, price)
+					id, created_at, name, category, price)
 				if err != nil {
 					log.Printf("Ошибка записи в базу данных для ID '%s': %v", id, err)
 					http.Error(w, "Ошибка записи в базу данных", http.StatusInternalServerError)
@@ -178,13 +178,13 @@ func handleGetPrices(w http.ResponseWriter, r *http.Request) {
 
 	writer.Write([]string{"id", "created_at", "name", "category", "price"})
 	for rows.Next() {
-		var id, createdAt, name, category string
+		var id, created_at, name, category string
 		var price float64
-		if err := rows.Scan(&id, &createdAt, &name, &category, &price); err != nil {
+		if err := rows.Scan(&id, &created_at, &name, &category, &price); err != nil {
 			http.Error(w, "Ошибка чтения строки", http.StatusInternalServerError)
 			return
 		}
-		writer.Write([]string{id, createdAt, name, category, fmt.Sprintf("%.2f", price)})
+		writer.Write([]string{id, created_at, name, category, fmt.Sprintf("%.2f", price)})
 	}
 
 	archive, err := os.Create("data.zip")
