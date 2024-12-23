@@ -106,12 +106,18 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 
-				// Преобразование данных
-				id := record[0]
+				// Проверка и обработка данных
+				if len(record) < 5 {
+					log.Printf("Ошибка: недостаточно данных в строке: %v", record)
+					http.Error(w, "Ошибка в формате CSV", http.StatusBadRequest)
+					return
+				}
+
+				id := strings.TrimSpace(record[0])
 				createdAt := strings.TrimSpace(record[1])
-				name := record[2]
-				category := record[3]
-				price, err := strconv.ParseFloat(record[4], 64)
+				name := strings.TrimSpace(record[2])
+				category := strings.TrimSpace(record[3])
+				price, err := strconv.ParseFloat(strings.TrimSpace(record[4]), 64)
 				if err != nil {
 					log.Printf("Ошибка преобразования цены '%s': %v", record[4], err)
 					http.Error(w, "Ошибка преобразования цены", http.StatusBadRequest)
