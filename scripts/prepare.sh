@@ -17,17 +17,23 @@ echo "Проверяем доступность PostgreSQL..."
 if ! psql -U postgres -h $PGHOST -p $PORT -c "\\q" &> /dev/null; then
   echo "PostgreSQL недоступен на $PGHOST:$PORT. Проверяем окружение GitHub Actions..."
   
-  # Проверить, запущен ли контейнер PostgreSQL
-  if [ -n "$(which docker)" ] && [ "$(docker ps -q -f name=postgres)" ]; then
-    echo "Контейнер PostgreSQL запущен. Проверяем его статус..."
-    if ! docker exec postgres pg_isready -U postgres; then
-      echo "PostgreSQL в контейнере недоступен. Проверьте конфигурацию Docker."
-      exit 1
-    fi
-  else
-    echo "PostgreSQL не найден ни как служба, ни как контейнер. Проверьте окружение."
+  # Определяем контейнер PostgreSQL
+  POSTGRES_CONTAINER=$(docker ps --filter "ancestor=postgres:15" --format "{{.ID}}")
+  
+  if [ -z "$POSTGRES_CONTAINER" ]; then
+    echo "Контейнер PostgreSQL не найден. Проверьте конфигурацию Docker."
     exit 2
   fi
+
+  echo "Контейнер PostgreSQL найден: $POSTGRES_CONTAINER. Проверяем статус..."
+  if ! docker exec $POSTGRES_CONTAINER pg_isready -U postgres; then
+    echo "PostgreSQL в контейнере недоступен. Проверьте конфигурацию Docker."
+    exit 3
+  fi
+
+  # Настраиваем подключение к контейнеру
+  PGHOST="127.0.0.1"
+  echo "Подключение настроено на контейнер PostgreSQL."
 else
   echo "PostgreSQL доступен. Продолжаем настройку..."
 fi
