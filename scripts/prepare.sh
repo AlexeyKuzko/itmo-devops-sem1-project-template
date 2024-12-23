@@ -1,59 +1,40 @@
 #!/bin/bash
 
-# Сразу останавливается, если какая-либо команда возвращает ненулевой код.
+# Прекращать выполнение при ошибках
 set -e
 
 echo "Подготовка базы данных..."
 
-# Проверить наличие PostgreSQL, если нет - установить
-if ! command -v psql &> /dev/null; then
-  echo "PostgreSQL не найден, пробуем установить..."
-  sudo apt-get update
-  sudo apt-get install -y postgresql postgresql-client
-fi
-
-# Проверить, запущен ли сервис PostgreSQL
-if ! sudo service postgresql status &> /dev/null; then
-  echo "PostgreSQL не запущен, запускаем..."
-  sudo service postgresql start
-fi
-
-# Проверим подключение к PostgreSQL через сокет и по сети
-if ! psql -U postgres -c "\\q" &> /dev/null; then
-  echo "Ошибка подключения к PostgreSQL через сокет. Пробуем подключиться по сети..."
-  
-  # Проверяем конфигурацию postgresql.conf
-  config_path=$(sudo find /etc -name postgresql.conf 2>/dev/null | head -n 1)
-
-  if [ -z "$config_path" ]; then
-    echo "Не удалось найти файл postgresql.conf. Проверьте установку PostgreSQL."
-    exit 2
-  fi
-
-  echo "Файл конфигурации: $config_path"
-  if ! grep -q "unix_socket_directories" "$config_path"; then
-    echo "Добавляем unix_socket_directories в конфигурацию..."
-    echo "unix_socket_directories = '/var/run/postgresql'" | sudo tee -a "$config_path"
-  fi
-
-  echo "Перезапускаем PostgreSQL..."
-  sudo service postgresql restart
-
-  # Повторная проверка подключения
-  if ! psql -U postgres -c "\\q" &> /dev/null; then
-    echo "Не удалось подключиться к PostgreSQL после исправлений. Проверьте конфигурацию вручную."
-    exit 2
-  fi
-fi
-
-# Подключаемся к базе данных
-echo "Настройка базы данных..."
+# Переменные для подключения
+PGHOST="localhost"
 PGUSER="validator"
 PGPASSWORD="val1dat0r"
 DBNAME="project-sem-1"
+PORT=5432
+
+# Проверка доступности PostgreSQL
+echo "Проверяем доступность PostgreSQL..."
+if ! psql -U postgres -h $PGHOST -p $PORT -c "\\q" &> /dev/null; then
+  echo "PostgreSQL недоступен на $PGHOST:$PORT. Проверяем окружение GitHub Actions..."
+  
+  # Проверить, запущен ли контейнер PostgreSQL
+  if [ -n "$(which docker)" ] && [ "$(docker ps -q -f name=postgres)" ]; then
+    echo "Контейнер PostgreSQL запущен. Проверяем его статус..."
+    if ! docker exec postgres pg_isready -U postgres; then
+      echo "PostgreSQL в контейнере недоступен. Проверьте конфигурацию Docker."
+      exit 1
+    fi
+  else
+    echo "PostgreSQL не найден ни как служба, ни как контейнер. Проверьте окружение."
+    exit 2
+  fi
+else
+  echo "PostgreSQL доступен. Продолжаем настройку..."
+fi
 
 # Создать пользователя и базу данных
-psql -v ON_ERROR_STOP=1 <<-EOSQL
+echo "Создаём пользователя и базу данных..."
+psql -v ON_ERROR_STOP=1 -h $PGHOST -p $PORT <<-EOSQL
   DO \$\$ BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = '${PGUSER}') THEN
       CREATE USER ${PGUSER} WITH PASSWORD '${PGPASSWORD}';
@@ -68,7 +49,8 @@ psql -v ON_ERROR_STOP=1 <<-EOSQL
 EOSQL
 
 # Создать таблицу
-psql -U ${PGUSER} -d ${DBNAME} -v ON_ERROR_STOP=1 <<-EOSQL
+echo "Создаём таблицу..."
+psql -U ${PGUSER} -d ${DBNAME} -h $PGHOST -p $PORT -v ON_ERROR_STOP=1 <<-EOSQL
   CREATE TABLE IF NOT EXISTS prices (
     id SERIAL PRIMARY KEY,
     product_id INT NOT NULL,
