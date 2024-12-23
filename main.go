@@ -54,18 +54,30 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Разархивация и запись данных в БД
-	var totalItems int
-	var totalCategoriesMap = make(map[string]bool)
-	var totalPrice float64
-
-	reader, err := zip.NewReader(file, r.ContentLength)
+	tempFile, err := os.CreateTemp("", "uploaded-*.zip")
 	if err != nil {
-		http.Error(w, "Ошибка чтения архива", http.StatusInternalServerError)
+		http.Error(w, "Ошибка сохранения файла", http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(tempFile.Name())
+
+	if _, err := io.Copy(tempFile, file); err != nil {
+		http.Error(w, "Ошибка копирования файла", http.StatusInternalServerError)
 		return
 	}
 
-	for _, f := range reader.File {
+	zipReader, err := zip.OpenReader(tempFile.Name())
+	if err != nil {
+		http.Error(w, "Ошибка чтения архива", http.StatusBadRequest)
+		return
+	}
+	defer zipReader.Close()
+
+	var totalItems int
+	categorySet := make(map[string]struct{})
+	var totalPrice float64
+
+	for _, f := range zipReader.File {
 		if strings.HasSuffix(f.Name, ".csv") {
 			csvFile, err := f.Open()
 			if err != nil {
@@ -74,39 +86,36 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 			}
 			defer csvFile.Close()
 
-			csvReader := csv.NewReader(csvFile)
-			_, _ = csvReader.Read() // Пропускаем заголовок
+			reader := csv.NewReader(csvFile)
+			_, _ = reader.Read() // Пропуск заголовка
+
 			for {
-				record, err := csvReader.Read()
+				record, err := reader.Read()
 				if err == io.EOF {
 					break
 				}
 				if err != nil {
-					http.Error(w, "Ошибка чтения CSV", http.StatusInternalServerError)
+					http.Error(w, "Ошибка чтения строки CSV", http.StatusInternalServerError)
 					return
 				}
 
-				id := record[0]
-				createdAt := record[1]
-				name := record[2]
-				category := record[3]
 				price, _ := strconv.ParseFloat(record[4], 64)
 
 				_, err = db.Exec("INSERT INTO prices (id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
-					id, createdAt, name, category, price)
+					record[0], record[1], record[2], record[3], price)
 				if err != nil {
 					http.Error(w, "Ошибка записи в базу данных", http.StatusInternalServerError)
 					return
 				}
 
 				totalItems++
-				totalCategoriesMap[category] = true
+				categorySet[record[3]] = struct{}{}
 				totalPrice += price
 			}
 		}
 	}
 
-	totalCategories := len(totalCategoriesMap)
+	totalCategories := len(categorySet)
 	response := PostResponse{
 		TotalItems:      totalItems,
 		TotalCategories: totalCategories,
@@ -183,6 +192,6 @@ func main() {
 		}
 	})
 
-	log.Println("Сервер запущен на порту 8080")
+	log.Println("Сервер успешно запущен на порту 8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
