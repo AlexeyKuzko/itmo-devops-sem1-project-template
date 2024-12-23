@@ -7,15 +7,17 @@ echo "Подготовка базы данных..."
 
 # Переменные для подключения
 PGHOST="localhost"
+PGPORT=5432
 PGUSER="validator"
 PGPASSWORD="val1dat0r"
 DBNAME="project-sem-1"
-PORT=5432
+
+export PGPASSWORD
 
 # Проверка доступности PostgreSQL
 echo "Проверяем доступность PostgreSQL..."
-if ! psql -U postgres -h $PGHOST -p $PORT -c "\\q" &> /dev/null; then
-  echo "PostgreSQL недоступен на $PGHOST:$PORT. Проверяем окружение GitHub Actions..."
+if ! psql -U postgres -h $PGHOST -p $PGPORT -c "\\q" &> /dev/null; then
+  echo "PostgreSQL недоступен на $PGHOST:$PGPORT. Проверяем окружение GitHub Actions..."
   
   # Определяем контейнер PostgreSQL
   POSTGRES_CONTAINER=$(docker ps --filter "ancestor=postgres:15" --format "{{.ID}}")
@@ -26,21 +28,19 @@ if ! psql -U postgres -h $PGHOST -p $PORT -c "\\q" &> /dev/null; then
   fi
 
   echo "Контейнер PostgreSQL найден: $POSTGRES_CONTAINER. Проверяем статус..."
-  if ! docker exec $POSTGRES_CONTAINER pg_isready -U postgres; then
+  if ! docker exec $POSTGRES_CONTAINER pg_isready -U postgres &> /dev/null; then
     echo "PostgreSQL в контейнере недоступен. Проверьте конфигурацию Docker."
     exit 3
   fi
 
-  # Настраиваем подключение к контейнеру
+  # Обновляем хост на 127.0.0.1
   PGHOST="127.0.0.1"
   echo "Подключение настроено на контейнер PostgreSQL."
-else
-  echo "PostgreSQL доступен. Продолжаем настройку..."
 fi
 
 # Создать пользователя и базу данных
 echo "Создаём пользователя и базу данных..."
-psql -v ON_ERROR_STOP=1 -h $PGHOST -p $PORT <<-EOSQL
+psql -U postgres -h $PGHOST -p $PGPORT <<-EOSQL
   DO \$\$ BEGIN
     IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = '${PGUSER}') THEN
       CREATE USER ${PGUSER} WITH PASSWORD '${PGPASSWORD}';
@@ -56,7 +56,7 @@ EOSQL
 
 # Создать таблицу
 echo "Создаём таблицу..."
-psql -U ${PGUSER} -d ${DBNAME} -h $PGHOST -p $PORT -v ON_ERROR_STOP=1 <<-EOSQL
+psql -U ${PGUSER} -h $PGHOST -p $PGPORT -d ${DBNAME} <<-EOSQL
   CREATE TABLE IF NOT EXISTS prices (
     id SERIAL PRIMARY KEY,
     product_id INT NOT NULL,
