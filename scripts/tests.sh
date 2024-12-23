@@ -48,6 +48,7 @@ check_api_simple() {
         echo -e "${GREEN}✓ POST запрос успешен${NC}"
     else
         echo -e "${RED}✗ POST запрос неуспешен${NC}"
+        echo -e "${RED}✗ Ответ: $response${NC}"
         return 1
     fi
     
