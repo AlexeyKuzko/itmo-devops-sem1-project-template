@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -99,17 +100,33 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 
-				price, _ := strconv.ParseFloat(record[4], 64)
+				// Преобразование данных
+				id := record[0]
+				createdAt := strings.TrimSpace(record[1])
+				name := record[2]
+				category := record[3]
+				price, err := strconv.ParseFloat(record[4], 64)
+				if err != nil {
+					http.Error(w, "Ошибка преобразования цены", http.StatusBadRequest)
+					return
+				}
 
+				// Проверка формата даты
+				if _, err := time.Parse("2006-01-02", createdAt); err != nil {
+					http.Error(w, "Некорректный формат даты", http.StatusBadRequest)
+					return
+				}
+
+				// Запись в базу данных
 				_, err = db.Exec("INSERT INTO prices (id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
-					record[0], record[1], record[2], record[3], price)
+					id, createdAt, name, category, price)
 				if err != nil {
 					http.Error(w, "Ошибка записи в базу данных", http.StatusInternalServerError)
 					return
 				}
 
 				totalItems++
-				categorySet[record[3]] = struct{}{}
+				categorySet[category] = struct{}{}
 				totalPrice += price
 			}
 		}
