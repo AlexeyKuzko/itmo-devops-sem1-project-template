@@ -9,14 +9,16 @@ echo "Подготовка базы данных..."
 PGHOST="localhost"
 PGPORT=5432
 PGUSER="validator"
-PGPASSWORD="val1dat0r"
+PGPASSWORD="val1dat0r" 
+DBUSER="validator"
+DBPASS="val1dat0r"
 DBNAME="project-sem-1"
 
 export PGPASSWORD
 
 # Проверка доступности PostgreSQL
 echo "Проверяем доступность PostgreSQL..."
-if ! psql -U postgres -h $PGHOST -p $PGPORT -c "\\q" &> /dev/null; then
+if ! psql -U $PGUSER -h $PGHOST -p $PGPORT -c "\\q" &> /dev/null; then
   echo "PostgreSQL недоступен на $PGHOST:$PGPORT. Проверяем окружение GitHub Actions..."
   
   # Определяем контейнер PostgreSQL
@@ -40,23 +42,23 @@ fi
 
 # Создать пользователя и базу данных
 echo "Создаём пользователя и базу данных..."
-psql -U postgres -h $PGHOST -p $PGPORT <<-EOSQL
+psql -U $PGUSER -h $PGHOST -p $PGPORT <<-EOSQL
   DO \$\$ BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = '${PGUSER}') THEN
-      CREATE USER ${PGUSER} WITH PASSWORD '${PGPASSWORD}';
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = '${DBUSER}') THEN
+      CREATE USER ${DBUSER} WITH PASSWORD '${DBPASS}';
     END IF;
   END \$\$;
 
   DO \$\$ BEGIN
     IF NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DBNAME}') THEN
-      CREATE DATABASE ${DBNAME} OWNER ${PGUSER};
+      CREATE DATABASE ${DBNAME} OWNER ${DBUSER};
     END IF;
   END \$\$;
 EOSQL
 
 # Создать таблицу
 echo "Создаём таблицу..."
-psql -U ${PGUSER} -h $PGHOST -p $PGPORT -d ${DBNAME} <<-EOSQL
+psql -U ${DBUSER} -h $PGHOST -p $PGPORT -d ${DBNAME} <<-EOSQL
   CREATE TABLE IF NOT EXISTS prices (
     id SERIAL PRIMARY KEY,
     product_id INT NOT NULL,
