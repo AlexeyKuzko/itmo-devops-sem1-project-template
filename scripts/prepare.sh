@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Прекращать выполнение при ошибках
+# Завершаем выполнение при ошибках
 set -e
 
 echo "Подготовка базы данных..."
@@ -9,56 +9,49 @@ echo "Подготовка базы данных..."
 PGHOST="localhost"
 PGPORT=5432
 PGUSER="validator"
-PGPASSWORD="val1dat0r" 
-DBUSER="validator"
-DBPASS="val1dat0r"
+PGPASSWORD="val1dat0r"
 DBNAME="project-sem-1"
 
 export PGPASSWORD
 
-# Проверка доступности PostgreSQL
-echo "Проверяем доступность PostgreSQL..."
-if ! psql -U $PGUSER -h $PGHOST -p $PGPORT -c "\\q" &> /dev/null; then
-  echo "PostgreSQL недоступен на $PGHOST:$PGPORT. Проверяем окружение GitHub Actions..."
+# Проверка доступности базы данных
+echo "Проверяем доступность базы данных..."
+if ! psql -U "$PGUSER" -h "$PGHOST" -p "$PGPORT" -d "$DBNAME" -c "\\q" &> /dev/null; then
+  echo "База данных $DBNAME недоступна. Проверяем настройки..."
   
-  # Определяем контейнер PostgreSQL
-  POSTGRES_CONTAINER=$(docker ps --filter "ancestor=postgres:15" --format "{{.ID}}")
-  
-  if [ -z "$POSTGRES_CONTAINER" ]; then
-    echo "Контейнер PostgreSQL не найден. Проверьте конфигурацию Docker."
-    exit 2
+  # Проверка подключения с пользователем postgres
+  echo "Пробуем подключиться как postgres..."
+  PGUSER="postgres"
+  if ! psql -U "$PGUSER" -h "$PGHOST" -p "$PGPORT" -c "\\q" &> /dev/null; then
+    echo "Ошибка: Не удалось подключиться к базе данных как postgres."
+    exit 1
   fi
 
-  echo "Контейнер PostgreSQL найден: $POSTGRES_CONTAINER. Проверяем статус..."
-  if ! docker exec $POSTGRES_CONTAINER pg_isready -U postgres &> /dev/null; then
-    echo "PostgreSQL в контейнере недоступен. Проверьте конфигурацию Docker."
-    exit 3
-  fi
+  # Создаём пользователя и базу данных
+  echo "Создаём пользователя и базу данных..."
+  psql -U "$PGUSER" -h "$PGHOST" -p "$PGPORT" <<-EOSQL
+    DO \$\$ BEGIN
+      IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = 'validator') THEN
+        CREATE USER validator WITH PASSWORD 'val1dat0r';
+      END IF;
+    END \$\$;
 
-  # Обновляем хост на 127.0.0.1
-  PGHOST="127.0.0.1"
-  echo "Подключение настроено на контейнер PostgreSQL."
+    DO \$\$ BEGIN
+      IF NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DBNAME}') THEN
+        CREATE DATABASE ${DBNAME} OWNER validator;
+      END IF;
+    END \$\$;
+
+    GRANT ALL PRIVILEGES ON DATABASE ${DBNAME} TO validator;
+EOSQL
+else
+  echo "База данных $DBNAME доступна. Ничего не требуется."
 fi
 
-# Создать пользователя и базу данных
-echo "Создаём пользователя и базу данных..."
-psql -U $PGUSER -h $PGHOST -p $PGPORT <<-EOSQL
-  DO \$\$ BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = '${DBUSER}') THEN
-      CREATE USER ${DBUSER} WITH PASSWORD '${DBPASS}';
-    END IF;
-  END \$\$;
-
-  DO \$\$ BEGIN
-    IF NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DBNAME}') THEN
-      CREATE DATABASE ${DBNAME} OWNER ${DBUSER};
-    END IF;
-  END \$\$;
-EOSQL
-
-# Создать таблицу
-echo "Создаём таблицу..."
-psql -U ${DBUSER} -h $PGHOST -p $PGPORT -d ${DBNAME} <<-EOSQL
+# Проверка/создание таблицы
+echo "Проверяем таблицу prices..."
+PGUSER="validator"
+psql -U "$PGUSER" -h "$PGHOST" -p "$PGPORT" -d "$DBNAME" <<-EOSQL
   CREATE TABLE IF NOT EXISTS prices (
     id SERIAL PRIMARY KEY,
     product_id INT NOT NULL,
@@ -69,4 +62,4 @@ psql -U ${DBUSER} -h $PGHOST -p $PGPORT -d ${DBNAME} <<-EOSQL
   );
 EOSQL
 
-echo "Подготовка базы данных успешно завершена."
+echo "Подготовка базы данных завершена успешно."
