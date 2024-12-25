@@ -84,6 +84,7 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 	categorySet := make(map[string]struct{})
 	var totalPrice float64
 
+	var csvRecords [][]string
 	for _, f := range zipReader.File {
 		if strings.HasSuffix(f.Name, ".csv") {
 			csvFile, err := f.Open()
@@ -95,58 +96,54 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 			defer csvFile.Close()
 
 			reader := csv.NewReader(csvFile)
-			_, _ = reader.Read() // Пропуск заголовка
-
-			for {
-				record, err := reader.Read()
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					log.Printf("Ошибка чтения строки CSV: %v", err)
-					skippedRows++
-					continue
-				}
-
-				// Проверка и обработка данных
-				if len(record) < 5 {
-					log.Printf("Ошибка: недостаточно данных в строке: %v", record)
-					skippedRows++
-					continue
-				}
-
-				id := strings.TrimSpace(record[0])
-				created_at := strings.TrimSpace(record[1])
-				name := strings.TrimSpace(record[2])
-				category := strings.TrimSpace(record[3])
-				price, err := strconv.ParseFloat(strings.TrimSpace(record[4]), 64)
-				if err != nil {
-					log.Printf("Ошибка преобразования цены '%s': %v", record[4], err)
-					skippedRows++
-					continue
-				}
-
-				// Проверка формата даты
-				if _, err := time.Parse("2006-01-02", created_at); err != nil {
-					log.Printf("Некорректный формат даты '%s': %v", created_at, err)
-					skippedRows++
-					continue
-				}
-
-				// Запись в базу данных
-				_, err = db.Exec("INSERT INTO prices (id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
-					id, created_at, name, category, price)
-				if err != nil {
-					log.Printf("Ошибка записи в базу данных для ID '%s': %v", id, err)
-					skippedRows++
-					continue
-				}
-
-				totalItems++
-				categorySet[category] = struct{}{}
-				totalPrice += price
+			records, err := reader.ReadAll()
+			if err != nil {
+				log.Printf("Ошибка чтения CSV: %v", err)
+				http.Error(w, "Ошибка чтения CSV", http.StatusInternalServerError)
+				return
 			}
+			csvRecords = append(csvRecords, records...)
 		}
+	}
+
+	for _, record := range csvRecords {
+		// Проверка и обработка данных
+		if len(record) < 5 {
+			log.Printf("Ошибка: недостаточно данных в строке: %v", record)
+			skippedRows++
+			continue
+		}
+
+		id := strings.TrimSpace(record[0])
+		created_at := strings.TrimSpace(record[1])
+		name := strings.TrimSpace(record[2])
+		category := strings.TrimSpace(record[3])
+		price, err := strconv.ParseFloat(strings.TrimSpace(record[4]), 64)
+		if err != nil {
+			log.Printf("Ошибка преобразования цены '%s': %v", record[4], err)
+			skippedRows++
+			continue
+		}
+
+		// Проверка формата даты
+		if _, err := time.Parse("2006-01-02", created_at); err != nil {
+			log.Printf("Некорректный формат даты '%s': %v", created_at, err)
+			skippedRows++
+			continue
+		}
+
+		// Запись в базу данных
+		_, err = db.Exec("INSERT INTO prices (id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
+			id, created_at, name, category, price)
+		if err != nil {
+			log.Printf("Ошибка записи в базу данных для ID '%s': %v", id, err)
+			skippedRows++
+			continue
+		}
+
+		totalItems++
+		categorySet[category] = struct{}{}
+		totalPrice += price
 	}
 
 	totalCategories := len(categorySet)
