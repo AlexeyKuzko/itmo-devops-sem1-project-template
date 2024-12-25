@@ -166,7 +166,6 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 		"total_items":      totalItems,
 		"total_categories": totalCategories,
 		"total_price":      totalPrice,
-		"skipped_rows":     skippedRows,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
