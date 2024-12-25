@@ -133,12 +133,27 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Запись в базу данных
-		_, err = db.Exec("INSERT INTO prices (id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
+		tx, err := db.Begin()
+		if err != nil {
+			log.Printf("Ошибка начала транзакции: %v", err)
+			http.Error(w, "Ошибка начала транзакции", http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback()
+
+		_, err = tx.Exec("INSERT INTO prices (id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
 			id, created_at, name, category, price)
 		if err != nil {
 			log.Printf("Ошибка записи в базу данных для ID '%s': %v", id, err)
 			skippedRows++
 			continue
+		}
+
+		err = tx.Commit()
+		if err != nil {
+			log.Printf("Ошибка подтверждения транзакции: %v", err)
+			http.Error(w, "Ошибка подтверждения транзакции", http.StatusInternalServerError)
+			return
 		}
 
 		totalItems++
