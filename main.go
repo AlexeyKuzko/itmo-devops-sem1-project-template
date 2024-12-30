@@ -39,8 +39,10 @@ type PostResponse struct {
 // Инициализация базы данных
 func initDB() {
 	var err error
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost, dbPort, dbUser, dbPassword, dbName)
+	connStr := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		dbHost, dbPort, dbUser, dbPassword, dbName,
+	)
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatalf("Ошибка подключения к базе данных: %v", err)
@@ -79,11 +81,7 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 	}
 	defer zipReader.Close()
 
-	var totalItems int
-	var skippedRows int
-	categorySet := make(map[string]struct{})
-	var totalPrice float64
-
+	// Читаем сразу все CSV-файлы из архива
 	var csvRecords [][]string
 	for _, f := range zipReader.File {
 		if strings.HasSuffix(f.Name, ".csv") {
@@ -106,11 +104,20 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Открываем транзакцию один раз на всю пачку
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Ошибка начала транзакции: %v", err)
+		http.Error(w, "Ошибка начала транзакции", http.StatusInternalServerError)
+		return
+	}
+	// Если что-то пойдёт не так, откатим все изменения
+	defer tx.Rollback()
+
 	for _, record := range csvRecords {
 		// Проверка и обработка данных
 		if len(record) < 5 {
-			log.Printf("Ошибка: недостаточно данных в строке: %v", record)
-			skippedRows++
+			// Недостаточно данных для вставки — просто пропускаем запись
 			continue
 		}
 
@@ -120,53 +127,71 @@ func handlePostPrices(w http.ResponseWriter, r *http.Request) {
 		category := strings.TrimSpace(record[3])
 		price, err := strconv.ParseFloat(strings.TrimSpace(record[4]), 64)
 		if err != nil {
+			// Некорректная цена — пропускаем запись
 			log.Printf("Ошибка преобразования цены '%s': %v", record[4], err)
-			skippedRows++
 			continue
 		}
 
 		// Проверка формата даты
 		if _, err := time.Parse("2006-01-02", created_at); err != nil {
+			// Некорректный формат даты — пропускаем запись
 			log.Printf("Некорректный формат даты '%s': %v", created_at, err)
-			skippedRows++
 			continue
 		}
 
-		// Запись в базу данных
-		tx, err := db.Begin()
-		if err != nil {
-			log.Printf("Ошибка начала транзакции: %v", err)
-			http.Error(w, "Ошибка начала транзакции", http.StatusInternalServerError)
-			return
-		}
-		defer tx.Rollback()
-
-		_, err = tx.Exec("INSERT INTO prices (id, created_at, name, category, price) VALUES ($1, $2, $3, $4, $5)",
-			id, created_at, name, category, price)
+		// Вставка в базу в рамках одной транзакции
+		_, err = tx.Exec(`
+            INSERT INTO prices (id, created_at, name, category, price)
+            VALUES ($1, $2, $3, $4, $5)
+        `, id, created_at, name, category, price)
 		if err != nil {
 			log.Printf("Ошибка записи в базу данных для ID '%s': %v", id, err)
-			skippedRows++
+			// Если не получается вставить конкретную строку, пропускаем её
 			continue
 		}
-
-		err = tx.Commit()
-		if err != nil {
-			log.Printf("Ошибка подтверждения транзакции: %v", err)
-			http.Error(w, "Ошибка подтверждения транзакции", http.StatusInternalServerError)
-			return
-		}
-
-		totalItems++
-		categorySet[category] = struct{}{}
-		totalPrice += price
 	}
 
-	totalCategories := len(categorySet)
+	// После того, как все данные вставлены, делаем запросы для подсчёта итогов
+	var totalItems int
+	var totalCategories int
+	var totalPrice float64
+
+	err = tx.QueryRow("SELECT COUNT(*) FROM prices").Scan(&totalItems)
+	if err != nil {
+		log.Printf("Ошибка получения total_items: %v", err)
+		http.Error(w, "Ошибка чтения из базы данных", http.StatusInternalServerError)
+		return
+	}
+
+	err = tx.QueryRow("SELECT COUNT(DISTINCT category) FROM prices").Scan(&totalCategories)
+	if err != nil {
+		log.Printf("Ошибка получения total_categories: %v", err)
+		http.Error(w, "Ошибка чтения из базы данных", http.StatusInternalServerError)
+		return
+	}
+
+	// Чтобы избежать NULL (если вдруг база пустая), используем COALESCE
+	err = tx.QueryRow("SELECT COALESCE(SUM(price), 0) FROM prices").Scan(&totalPrice)
+	if err != nil {
+		log.Printf("Ошибка получения total_price: %v", err)
+		http.Error(w, "Ошибка чтения из базы данных", http.StatusInternalServerError)
+		return
+	}
+
+	// Завершаем транзакцию (коммитим все вставленные данные и подсчёты)
+	if err := tx.Commit(); err != nil {
+		log.Printf("Ошибка подтверждения транзакции: %v", err)
+		http.Error(w, "Ошибка подтверждения транзакции", http.StatusInternalServerError)
+		return
+	}
+
+	// Формируем и отправляем ответ
 	response := map[string]interface{}{
 		"total_items":      totalItems,
 		"total_categories": totalCategories,
 		"total_price":      totalPrice,
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -180,12 +205,12 @@ func handleGetPrices(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	// Create temporary directory for files
+	// Создаем временную директорию для файлов
 	tempDir := os.TempDir()
 	csvFilePath := filepath.Join(tempDir, "data.csv")
 	zipFilePath := filepath.Join(tempDir, "data.zip")
 
-	// Create CSV file
+	// Создаём CSV-файл
 	file, err := os.Create(csvFilePath)
 	if err != nil {
 		http.Error(w, "Ошибка создания файла CSV", http.StatusInternalServerError)
@@ -213,7 +238,7 @@ func handleGetPrices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create ZIP file
+	// Создаём архив
 	archive, err := os.Create(zipFilePath)
 	if err != nil {
 		http.Error(w, "Ошибка создания архива", http.StatusInternalServerError)
@@ -237,13 +262,13 @@ func handleGetPrices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ensure ZIP is properly closed
+	// Проверяем, что завершили запись в архив
 	if err := zipWriter.Close(); err != nil {
 		http.Error(w, "Ошибка завершения архива", http.StatusInternalServerError)
 		return
 	}
 
-	// Serve the file
+	// Отдаём файл пользователю
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"data.zip\"")
 	http.ServeFile(w, r, zipFilePath)
